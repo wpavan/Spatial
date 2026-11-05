@@ -1,0 +1,178 @@
+---
+title: "Explaining Relative Agronomic Efficiency (RAE) Visualizations"
+author: "Willingthon Pavan"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+## Introduction
+
+This RMarkdown explains the R code used to visualize and analyze **Relative Agronomic Efficiency (RAE)** data in Tanzania using geospatial visualizations. The code demonstrates how to create static plots with `ggplot2`, transform data into raster formats for heatmap visualizations, and generate interactive maps using the `leaflet` package.
+
+## Required Libraries
+
+We start by loading the required libraries. Each library serves the following purposes:
+
+```{r BLOCK_NAME, echo=TRUE, message=FALSE}
+# Load essential libraries
+library(tidyverse)    # For data manipulation and visualization
+library(plotly)       # For creating interactive plots
+library(raster)       # For raster data manipulation
+library(viridis)      # For color scales (e.g., Spectral palette)
+library(RColorBrewer) # For creating color palettes
+library(leaflet)      # For interactive maps
+```
+
+------------------------------------------------------------------------
+
+## Loading Data
+
+We load two datasets: 1. `Tanzania-Rae.csv`: Contains RAE data, including coordinates and values. 2. `Tanzania-polygon.csv`: Contains polygon data representing Tanzania's boundaries.
+
+```{r}
+# Load the datasets
+tz_rae <- read_csv("Tanzania-Rae.csv")        # RAE data
+tz_polygon <- read_csv("Tanzania-polygon.csv") # Polygon boundary data
+```
+
+------------------------------------------------------------------------
+
+## Static Visualization with `ggplot2`
+
+This section creates a **static plot** using `ggplot2`.
+
+### Step-by-Step Explanation
+
+1.  **Background Map**: We use `geom_polygon` to plot the boundaries of Tanzania.
+2.  **RAE Data Overlay**: Points representing RAE data are added with `geom_point`. Each point is colored based on the `rae` value.
+3.  **Coordinate Fixing**: `coord_fixed` ensures the map has correct proportions.
+4.  **Color Scale**: `scale_color_distiller` applies the **Spectral** color palette to the RAE data.
+
+```{r}
+# Create a static plot with ggplot2
+plot <- ggplot() + 
+  geom_polygon(data = tz_polygon, aes(x = long, y = lat), 
+               fill = "white", color = "gray") + # Plot boundary
+  coord_fixed(1.3) + # Fix aspect ratio
+  geom_point(data = na.omit(tz_rae), 
+             aes(x = Longitude, y = Latitude, color = rae), 
+             shape = 15, size = 1) + # Add RAE points
+  labs(x = "Longitude", y = "Latitude", 
+       title = "Relative Agronomic Efficiency (RAE)") + # Add labels
+  theme_minimal() + # Minimal theme for a clean look
+  scale_color_distiller("RAE", palette = "Spectral", 
+                        limits = c(0, 100), 
+                        na.value = "darkblue", 
+                        direction = 1) # Spectral color
+plot
+```
+
+------------------------------------------------------------------------
+
+## Heatmaps (Using Raster)
+
+We will create a **heatmap** of RAE data by transforming the dataset into a raster format.
+
+### Step-by-Step Explanation
+
+1.  **Raster Conversion**: The `rasterFromXYZ` function converts the `tz_rae` dataset (with columns `Longitude`, `Latitude`, and `rae`) into a raster object.
+2.  **Set CRS**: The `crs` function assigns the coordinate reference system (CRS) to WGS84.
+3.  **Disaggregation**: The raster is refined with `disaggregate`, which increases its resolution by dividing each pixel into smaller pixels.
+    -   method = 'bilinear'
+        -   Performs bilinear interpolation to estimate the values for the new smaller cells.
+        -   Values are interpolated based on the nearest four cells, providing a smooth transition.
+        -   Useful when you want a more realistic and continuous representation of data.
+    -   method = '' (Default)
+        -   When no method is specified, the original values are replicated into the new cells.
+
+```{r}
+# Transform data to raster format
+raster <- rasterFromXYZ(tz_rae %>% 
+                          dplyr::select(lon = Longitude, 
+                                        lat = Latitude, z = rae)) # Convert to raster
+crs(raster) <- sp::CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs") # Set CRS
+raster_dis <- disaggregate(raster, 5, 
+                           method = 'bilinear') # Refine resolution
+```
+
+------------------------------------------------------------------------
+
+## Plotting the Raster
+
+### Using Base R
+
+A quick way to visualize the raster is with the `plot` function.
+
+```{r}
+# Basic raster plot
+plot(raster_dis)
+```
+
+### Using `ggplot2`
+
+For a more customized heatmap, we convert the raster into a dataframe and plot it with `ggplot2`.
+
+```{r}
+# Convert raster to dataframe for ggplot2
+raster_df <- as.data.frame(raster_dis, xy = TRUE, na.rm = TRUE)
+
+# Plot heatmap with ggplot2
+ggplot(data = raster_df) +
+  geom_tile(aes(x = x, y = y, fill = z)) + 
+  scale_fill_distiller(
+    palette = "Spectral",   # Spectral palette
+    direction = 1,          # Normal color direction
+    na.value = "transparent" # Transparent for NA values
+  ) +           
+  labs(
+    title = "Relative Agronomic Efficiency (RAE)",
+    x = "Longitude",
+    y = "Latitude",
+    fill = "RAE"            # Legend title
+  ) +
+  theme_minimal()
+```
+
+------------------------------------------------------------------------
+
+## Using `leaflet`
+
+We use `leaflet` to create an **interactive map** with dynamic color mapping and legends.
+
+### Step-by-Step Explanation
+
+1.  **Color Palette**: The `colorNumeric` function creates a numeric color mapping for the Spectral palette.
+2.  **Add Raster**: `addRasterImage` overlays the raster data onto the map.
+3.  **Legend**: `addLegend` adds a legend to explain the color scale.
+
+```{r}
+# Create color palette
+col <- brewer.pal(11, "Spectral") # Spectral palette
+
+# Reverse domain for color mapping
+palLegend <- colorNumeric(
+  palette = col,
+  domain = rev(seq(0, 100, 10)), # Reverse values for correct mapping
+  na.color = "transparent"
+)
+
+# Plot interactive map with leaflet
+leaflet() %>% 
+  addTiles() %>% # Add base map
+  addRasterImage(raster_dis, 
+                 colors = palLegend, 
+                 opacity = 0.6) %>% # Add raster
+  addLegend(
+    pal = palLegend,
+    values = seq(0, 100, 25),  # Legend intervals
+    title = "RAE"             # Legend title
+  )
+```
+
+------------------------------------------------------------------------
+
+## Conclusion
+
+This RMarkdown explains how to visualize geospatial data effectively using **static**, **heatmap**, and **interactive** visualizations. The integration of `ggplot2`, `raster`, and `leaflet` demonstrates a flexible approach to data exploration and presentation.
