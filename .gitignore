@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# R / RStudio
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Python
+__pycache__/
+.venv/
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.log
+
+# Secrets
+.env
+
+# RStudio session files
+.Rproj.user/
+
+# Large original dataset (use ZIP instead)
+Tanzania-Rae.csv
